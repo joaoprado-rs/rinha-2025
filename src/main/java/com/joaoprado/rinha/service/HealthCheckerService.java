@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit;
 public class HealthCheckerService {
 
     //TODO: Cache these values with caffeine.
-    private WebClient webClient;
+    private WebClient webClient = WebClient.create();
     private boolean isDefaultHealthy;
     private long lastTimeChecked;
 

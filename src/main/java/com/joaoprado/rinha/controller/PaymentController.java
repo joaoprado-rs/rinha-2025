@@ -2,6 +2,7 @@ package com.joaoprado.rinha.controller;
 
 import com.joaoprado.rinha.dto.PaymentRequest;
 import com.joaoprado.rinha.queue.PaymentQueue;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -13,7 +14,11 @@ import java.util.Map;
 @RestController
 public class PaymentController {
 
-    PaymentQueue paymentQueue = new PaymentQueue();
+    PaymentQueue paymentQueue;
+
+    public PaymentController(PaymentQueue paymentQueue) {
+        this.paymentQueue = paymentQueue;
+    }
 
     @PostMapping("/payments")
     public void enqueuePayment(@RequestBody PaymentRequest paymentRequest) {
@@ -29,6 +34,5 @@ public class PaymentController {
     public void getPaymentSummary(@RequestParam Map<String, String> params) {
         String from = params.get("from");
         String to = params.get("to");
-
     }
 }
