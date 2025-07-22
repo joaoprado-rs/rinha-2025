@@ -32,7 +32,7 @@ public class ProcessorDispatcher {
                     logger.log(Level.INFO, "Processing request: " + message);
                     worker.executePaymentFromQueue(message);
                 } catch (Exception ex) {
-                    logger.log(Level.SEVERE, "Processing request: " + ex.getMessage(), ex);
+                    logger.log(Level.SEVERE, "Error: " + ex.getMessage(), ex);
                     ex.printStackTrace();
                 }
             }

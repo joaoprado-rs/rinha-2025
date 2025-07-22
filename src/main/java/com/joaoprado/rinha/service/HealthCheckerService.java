@@ -29,26 +29,30 @@ public class HealthCheckerService {
     }
 
     public void refresh() {
-        ClientResponse response = webClient
-                .get()
-                .uri("/payments/service-health")
-                .exchangeToMono(Mono::just)
-                .block(Duration.ofSeconds(1));
+        try {
+            ClientResponse response = webClient
+                    .get()
+                    .uri("http://payment-processor-default:8080/payments/service-health")
+                    .exchange()
+                    .block(Duration.ofSeconds(1));
+            if (response == null) {
+                this.isDefaultHealthy = false;
+                return;
+            }
+            HttpStatusCode status = response.statusCode();
+            if (status.is2xxSuccessful()) {
+                HealthCheckerResponse body = response.bodyToMono(HealthCheckerResponse.class)
+                        .block(Duration.ofSeconds(1));
 
-        if (response == null) {
-            this.isDefaultHealthy = false;
-            return;
-        }
-
-        HttpStatusCode status = response.statusCode();
-        if (status.is2xxSuccessful()) {
-            HealthCheckerResponse body = response.bodyToMono(HealthCheckerResponse.class).block();
-            if (Objects.nonNull(body) && !body.failing()) {
-                this.isDefaultHealthy = true;
+                if (body != null && !body.failing()) {
+                    this.isDefaultHealthy = true;
+                } else {
+                    this.isDefaultHealthy = false;
+                }
             } else {
                 this.isDefaultHealthy = false;
             }
-        } else {
+        } catch (Exception e) {
             this.isDefaultHealthy = false;
         }
     }

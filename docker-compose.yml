@@ -2,18 +2,13 @@ services:
   backend:
     build: .
     ports:
-      - "8080:8080"
+      - "9999:9999"
       - "5005:5005"
-    depends_on:
-      - db
+    networks:
+      - payment-processor
     environment:
       - JAVA_TOOL_OPTIONS=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
 
-  db:
-    image: postgres
-    environment:
-      POSTGRES_USER: joao
-      POSTGRES_PASSWORD: senha123
-      POSTGRES_DB: rinha
-    ports:
-      - "5432:5432"
+networks:
+  payment-processor:
+    external: true
