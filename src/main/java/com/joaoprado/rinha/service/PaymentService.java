@@ -6,6 +6,7 @@ import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -17,11 +18,13 @@ public class PaymentService {
     private final WebClient defaultClient;
     private final WebClient fallbackClient;
     private final HealthCheckerService healthChecker;
+    private final RedisService redisService;
 
-    public PaymentService(WebClient.Builder builder, HealthCheckerService healthChecker) {
+    public PaymentService(WebClient.Builder builder, HealthCheckerService healthChecker, RedisService redisService) {
         this.defaultClient = builder.baseUrl("http://payment-processor-default:8080").build();
         this.fallbackClient = builder.baseUrl("http://payment-processor-fallback:8080").build();
         this.healthChecker = healthChecker;
+        this.redisService = redisService;
     }
 
     public void execute(PaymentRequest paymentRequest) {
@@ -34,12 +37,14 @@ public class PaymentService {
                     .post()
                     .uri("/payments")
                     .body(Mono.just(paymentRequest), ClientResponse.class);
+            redisService.incrementPaymentCounter("default", paymentRequest);
         } else {
             logger.log(Level.INFO, "NOT HEALTHY");
             fallbackClient
                     .post()
                     .uri("/payments")
                     .body(Mono.just(paymentRequest), ClientResponse.class);
+            redisService.incrementPaymentCounter("fallback", paymentRequest);
         }
     }
 }
