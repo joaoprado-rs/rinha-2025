@@ -2,7 +2,7 @@ package com.joaoprado.rinha.service;
 
 import com.joaoprado.rinha.dto.HealthCheckerResponse;
 import org.springframework.http.HttpStatusCode;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
@@ -11,10 +11,9 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
-@Component
+@Service
 public class HealthCheckerService {
 
-    //TODO: Cache these values with caffeine.
     private WebClient webClient = WebClient.create();
     private boolean isDefaultHealthy;
     private long lastTimeChecked;

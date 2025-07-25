@@ -6,45 +6,29 @@ import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
-import java.time.Instant;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
 @Service
 public class PaymentService {
 
-    private static final Logger logger = Logger.getLogger(PaymentService.class.getName());
-
+    private final String PAYMENTS = "/payments";
     private final WebClient defaultClient;
     private final WebClient fallbackClient;
-    private final HealthCheckerService healthChecker;
-    private final RedisService redisService;
 
-    public PaymentService(WebClient.Builder builder, HealthCheckerService healthChecker, RedisService redisService) {
+    public PaymentService(WebClient.Builder builder) {
         this.defaultClient = builder.baseUrl("http://payment-processor-default:8080").build();
         this.fallbackClient = builder.baseUrl("http://payment-processor-fallback:8080").build();
-        this.healthChecker = healthChecker;
-        this.redisService = redisService;
     }
 
-    public void execute(PaymentRequest paymentRequest) {
-        logger.log(Level.INFO, "Executing payment: " + paymentRequest);
-        logger.log(Level.INFO, "Checking if it is healthy...");
-        boolean isHealthy = healthChecker.isDefaultHealthy();
-        if (isHealthy) {
-            logger.log(Level.INFO, "HEALTHY");
+    public void execute(PaymentRequest paymentRequest, boolean isDefault) {
+        if (isDefault) {
             defaultClient
                     .post()
-                    .uri("/payments")
+                    .uri(PAYMENTS)
                     .body(Mono.just(paymentRequest), ClientResponse.class);
-            redisService.incrementPaymentCounter("default", paymentRequest);
         } else {
-            logger.log(Level.INFO, "NOT HEALTHY");
             fallbackClient
                     .post()
-                    .uri("/payments")
+                    .uri(PAYMENTS)
                     .body(Mono.just(paymentRequest), ClientResponse.class);
-            redisService.incrementPaymentCounter("fallback", paymentRequest);
         }
     }
 }
