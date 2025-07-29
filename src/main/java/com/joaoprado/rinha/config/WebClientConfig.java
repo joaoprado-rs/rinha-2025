@@ -1,4 +1,4 @@
-package com.joaoprado.rinha.client;
+package com.joaoprado.rinha.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -6,11 +6,21 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 @Configuration
 public class WebClientConfig {
-  public WebClient defaultWebClient;
-  public WebClient fallbackWebClient;
 
-  @Bean
-  public WebClient defaultWebClient() {
-    return builder.baseUrl("http://payment-processor-default:8080").build();
-  }
+    @Bean("defaultProcessorWebClient")
+    public WebClient defaultProcessorWebClient(WebClient.Builder builder) {
+        return builder
+                .baseUrl("http://payment-processor-default:8080")
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(1024 * 1024)) // 1MB
+                .build();
+    }
+
+    @Bean("fallbackProcessorWebClient")
+    public WebClient fallbackProcessorWebClient(WebClient.Builder builder) {
+        return builder
+                .baseUrl("http://payment-processor-fallback:8080")
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(1024 * 1024)) // 1MB
+                .build();
+    }
+
 }

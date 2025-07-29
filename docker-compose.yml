@@ -20,11 +20,11 @@ x-api-templates:
         -Xlog:disable
         -XX:+UnlockExperimentalVMOptions
         -XX:+UseZGC
-#    deploy:
-#      resources:
-#        limits:
-#          cpus: '0.6'
-#          memory: "160MB"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.6'
+          memory: "160MB"
 
 services:
   api-1:
@@ -50,11 +50,11 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
-#    deploy:
-#      resources:
-#        limits:
-#          cpus: "0.15"
-#          memory: "10MB"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.15"
+          memory: "10MB"
 
 
   nginx:
@@ -69,11 +69,11 @@ services:
       - api-2
     networks:
       - backend
-#    deploy:
-#      resources:
-#        limits:
-#          cpus: '0.1'
-#          memory: "10MB"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: "10MB"
 networks:
   backend:
     driver: bridge

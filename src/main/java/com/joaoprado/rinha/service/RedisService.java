@@ -23,10 +23,36 @@ import java.util.stream.LongStream;
 
 @Service
 public class RedisService {
-  private final RedisAsyncCommands<String, String> redis;
+  public final RedisAsyncCommands<String, String> redis;
+  private static final String HEALTH_KEY = "health:status";
 
   public RedisService(StatefulRedisConnection redis) {
     this.redis = redis.async();
+  }
+
+  public void setHealthStatus(PaymentProcessor processor, boolean isHealthy, long responseTime) {
+    String processorName = processor.toString().toLowerCase();
+    Map<String, String> healthData = Map.of(
+            processorName + ":healthy", String.valueOf(isHealthy),
+            processorName + ":responseTime", String.valueOf(responseTime)
+    );
+    redis.hset(HEALTH_KEY, healthData);
+  }
+
+  public CompletableFuture<Boolean> isHealthy(PaymentProcessor processor) {
+    String processorName = processor.toString().toLowerCase();
+    return redis.hget(HEALTH_KEY, processorName + ":healthy")
+            .toCompletableFuture()
+            .thenApply(s -> "true".equals(s))
+            .exceptionally(ex -> false);
+  }
+
+  public CompletableFuture<Long> getMinResponseTime(PaymentProcessor processor) {
+    String processorName = processor.toString().toLowerCase();
+    return redis.hget(HEALTH_KEY, processorName + ":responseTime")
+            .toCompletableFuture()
+            .thenApply(s -> s != null ? Long.parseLong(s) : Long.MAX_VALUE)
+            .exceptionally(ex -> Long.MAX_VALUE);
   }
 
   public void incrementPaymentCounter(PaymentProcessor paymentProcessor, PaymentRequest paymentRequest) {
