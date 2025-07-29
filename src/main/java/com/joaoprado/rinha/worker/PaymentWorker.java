@@ -1,11 +1,13 @@
 package com.joaoprado.rinha.worker;
 
 import com.joaoprado.rinha.dto.PaymentRequest;
+import com.joaoprado.rinha.pojo.PaymentProcessor;
 import com.joaoprado.rinha.queue.PaymentQueue;
 import com.joaoprado.rinha.service.HealthCheckerService;
 import com.joaoprado.rinha.service.PaymentService;
 import com.joaoprado.rinha.service.RedisService;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -41,44 +43,60 @@ public class PaymentWorker {
 
   @PostConstruct
   public void consumeQueue() {
-    int threadCount = Runtime.getRuntime().availableProcessors();
+    int threadCount = Runtime.getRuntime().availableProcessors() * 4;
     executor = Executors.newFixedThreadPool(threadCount);
-
     for (int i = 0; i < threadCount; i++) {
       logger.log(Level.INFO, "Creating executor for thread " + i);
-
       executor.submit(() -> {
-        PaymentRequest request = queue.dequeue();
-        executePaymentRequest(request);
+        while (!Thread.currentThread().isInterrupted()) {
+          try {
+            PaymentRequest request = queue.dequeue();
+            if (request != null) {
+              executePaymentRequest(request);
+            }
+          } catch (Exception ex) {
+            Thread.currentThread().interrupt();
+            break;
+          }
+        }
       });
     }
   }
 
+  @PreDestroy
+  public void shutdown() {
+    if (executor != null) {
+      executor.shutdownNow();
+      logger.log(Level.INFO, "Shutting down worker...");
+    }
+  }
 
   public void executePaymentRequest(PaymentRequest message) {
     logger.log(Level.INFO, "Executing payment: " + message.correlationId());
     try {
-      paymentService.execute(message, healthChecker.isDefaultHealthy());
+      PaymentProcessor processor = determineProcessor();
+      paymentService.execute(message, processor);
+      registerPaymentsSummary(message, processor);
     } catch (Exception ex) {
       logger.log(Level.SEVERE, "Error: " + ex.getMessage(), ex);
       queue.enqueue(message);
     }
   }
 
-  public void handleListPayments(List<PaymentRequest> messages) {
-    for (PaymentRequest message : messages) {
-      try {
-        paymentService.execute(message, healthChecker.isDefaultHealthy());
-      } catch (Exception ex) {
-        logger.log(Level.SEVERE, "Error: " + ex.getMessage(), ex);
-        if (true) {
-          logger.log(Level.WARNING, "Payment is being requeued." + ex.getMessage(), ex);
-        }
+  public void registerPaymentsSummary(PaymentRequest message, PaymentProcessor processor) {
+    redisService.incrementPaymentCounter(processor, message);
+  }
+
+  public PaymentProcessor determineProcessor() {
+    try {
+      if (healthChecker.isDefaultHealthy()) {
+        return PaymentProcessor.DEFAULT;
+      } else {
+        return PaymentProcessor.FALLBACK;
       }
+    } catch (Exception ex) {
+      return PaymentProcessor.FALLBACK;
     }
   }
 
-  public void registerPaymentsSummary(PaymentRequest message) {
-
-  }
 }

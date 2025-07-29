@@ -1,5 +1,6 @@
 x-api-templates:
   app: &api-template
+
     build: .
     depends_on:
       - redis
@@ -22,8 +23,8 @@ x-api-templates:
 #    deploy:
 #      resources:
 #        limits:
-#          cpus: '0.55'
-#          memory: "155MB"
+#          cpus: '0.6'
+#          memory: "160MB"
 
 services:
   api-1:
@@ -45,17 +46,16 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 15s
       timeout: 3s
-      retries: 5
-      start_period: 10s
+      retries: 3
+      start_period: 5s
 #    deploy:
 #      resources:
 #        limits:
-#          cpus: "0.2"
-#          memory: "20MB"
-    tmpfs:
-      - /data
+#          cpus: "0.15"
+#          memory: "10MB"
+
 
   nginx:
     image: nginx:alpine
@@ -72,8 +72,8 @@ services:
 #    deploy:
 #      resources:
 #        limits:
-#          cpus: '0.2'
-#          memory: "20MB"
+#          cpus: '0.1'
+#          memory: "10MB"
 networks:
   backend:
     driver: bridge

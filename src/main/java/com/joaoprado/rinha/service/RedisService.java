@@ -2,6 +2,7 @@ package com.joaoprado.rinha.service;
 
 import com.joaoprado.rinha.dto.PaymentRequest;
 import com.joaoprado.rinha.dto.PaymentSummaryResponse;
+import com.joaoprado.rinha.pojo.PaymentProcessor;
 import io.lettuce.core.RedisFuture;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
@@ -28,10 +29,10 @@ public class RedisService {
     this.redis = redis.async();
   }
 
-  public void incrementPaymentCounter(String paymentProcessor, PaymentRequest paymentRequest) {
+  public void incrementPaymentCounter(PaymentProcessor paymentProcessor, PaymentRequest paymentRequest) {
     String key = "payment:" + paymentRequest.correlationId();
     Map<String, String> paymentData = Map.of(
-        "processor", paymentProcessor,
+        "processor", paymentProcessor.toString().toUpperCase(),
         "amount", String.valueOf(paymentRequest.amount()),
         "timestamp", String.valueOf(Instant.parse(paymentRequest.requestedAt()).toEpochMilli())
     );
@@ -70,7 +71,7 @@ public class RedisService {
         continue;
       }
 
-      if ("default".equals(data.get("processor"))) {
+      if ("DEFAULT".equals(data.get("processor"))) {
         countDefault++;
         amountDefault += Double.parseDouble(data.get("amount"));
       } else {
