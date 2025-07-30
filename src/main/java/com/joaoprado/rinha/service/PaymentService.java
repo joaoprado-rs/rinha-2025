@@ -6,7 +6,9 @@ import com.joaoprado.rinha.pojo.PaymentProcessor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
@@ -38,8 +40,11 @@ public class PaymentService {
         .body(Mono.just(paymentRequest), PaymentRequest.class)
         .retrieve()
         .toBodilessEntity()
-        .timeout(Duration.ofMillis(800))
+        .timeout(Duration.ofMillis(600))  // Timeout mais agressivo
+        .retryWhen(Retry.backoff(2, Duration.ofMillis(50))  // Retry rápido 2x
+            .filter(throwable -> !(throwable instanceof WebClientResponseException.BadRequest))) // Não retry em 400
         .then()
+        .doOnError(ex -> logger.fine("Payment failed for " + paymentRequest.correlationId() + ": " + ex.getClass().getSimpleName()))
         .toFuture();
   }
 }

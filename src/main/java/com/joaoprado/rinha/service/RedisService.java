@@ -80,7 +80,16 @@ public class RedisService {
 
   public Map<String, PaymentSummaryResponse.PaymentStats> generatePaymentStats(long startMillis, long endMillis) throws Exception {
     Map<String, PaymentSummaryResponse.PaymentStats> result = new HashMap<>();
-    List<String> ids = redis.zrangebyscore("payments:by_timestamp", (double) startMillis, (double) endMillis).get(1, TimeUnit.SECONDS);
+
+    // Timeout mais agressivo para evitar travamentos
+    List<String> ids = redis.zrangebyscore("payments:by_timestamp", (double) startMillis, (double) endMillis)
+        .get(500, TimeUnit.MILLISECONDS); // Reduzido de 1s para 500ms
+
+    // Limitar processamento para evitar sobrecarga
+    if (ids.size() > 10000) {
+      ids = ids.subList(0, 10000); // Processa no máximo 10k pagamentos
+    }
+
     List<CompletableFuture<Map<String, String>>> futures = ids.stream()
         .map(id -> redis.hgetall("payment:" + id).toCompletableFuture())
         .collect(Collectors.toList());
@@ -90,19 +99,25 @@ public class RedisService {
     int countFallback = 0;
     double amountFallback = 0;
 
+    // Timeout por future também
     for (int i = 0; i < ids.size(); i++) {
-      Map<String, String> data = futures.get(i).join();
+      try {
+        Map<String, String> data = futures.get(i).get(50, TimeUnit.MILLISECONDS); // Timeout agressivo por item
 
-      if (data == null || data.isEmpty()) {
+        if (data == null || data.isEmpty()) {
+          continue;
+        }
+
+        if ("DEFAULT".equals(data.get("processor"))) {
+          countDefault++;
+          amountDefault += Double.parseDouble(data.get("amount"));
+        } else {
+          countFallback++;
+          amountFallback += Double.parseDouble(data.get("amount"));
+        }
+      } catch (TimeoutException ex) {
+        // Skip este pagamento se demorar muito
         continue;
-      }
-
-      if ("DEFAULT".equals(data.get("processor"))) {
-        countDefault++;
-        amountDefault += Double.parseDouble(data.get("amount"));
-      } else {
-        countFallback++;
-        amountFallback += Double.parseDouble(data.get("amount"));
       }
     }
     result.put("default", new PaymentSummaryResponse.PaymentStats(countDefault, amountDefault));

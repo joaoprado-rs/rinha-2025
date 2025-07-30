@@ -9,23 +9,21 @@ x-api-templates:
       - payment-processor
     environment:
       JAVA_OPTS: >-
-        -Xms50m
-        -Xmx90m
-        -Xscmx30m
+        -Xms70m -Xmx120m
+        -Xscmx40m
         -Xshareclasses:cacheDir=/tmp
-        -Xgc:concurrentScavenge
-        -Xquickstart
-        -Xtune:virtualized
-        -XX:+UseContainerSupport
         -XX:+IdleTuningGcOnIdle
+        -XX:+UseContainerSupport
+        -Xtune:virtualized
+        -Xquickstart
+        -Xgc:concurrentScavenge
         -Xdisableexplicitgc
-        -XX:+OptimizeStringConcat
-
     deploy:
       resources:
         limits:
-          cpus: '0.6'
-          memory: "160MB"
+          cpus: '0.5'
+          memory: "150MB"
+
 
 services:
   api-1:
@@ -54,8 +52,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.15"
-          memory: "10MB"
+          cpus: '0.3'
+          memory: "30MB"
 
 
   nginx:
@@ -73,8 +71,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.1'
-          memory: "10MB"
+          cpus: '0.2'
+          memory: "20MB"
+
 networks:
   backend:
     driver: bridge
