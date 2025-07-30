@@ -38,7 +38,7 @@ public class PaymentService {
         .body(Mono.just(paymentRequest), PaymentRequest.class)
         .retrieve()
         .toBodilessEntity()
-        .timeout(Duration.ofMillis(1500))
+        .timeout(Duration.ofMillis(800))
         .then()
         .toFuture();
   }

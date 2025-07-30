@@ -9,17 +9,18 @@ x-api-templates:
       - payment-processor
     environment:
       JAVA_OPTS: >-
-        -Xms24m -Xmx80m
-        -XX:MaxMetaspaceSize=32m
-        -Dio.netty.maxDirectMemory=8m
-        -XX:+UseG1GC
-        -XX:MaxGCPauseMillis=50
-        -XX:G1HeapRegionSize=1m
-        -XX:+UseStringDeduplication
-        -XX:+AlwaysActAsServerClassMachine
-        -Xlog:disable
-        -XX:+UnlockExperimentalVMOptions
-        -XX:+UseZGC
+        -Xms50m
+        -Xmx90m
+        -Xscmx30m
+        -Xshareclasses:cacheDir=/tmp
+        -Xgc:concurrentScavenge
+        -Xquickstart
+        -Xtune:virtualized
+        -XX:+UseContainerSupport
+        -XX:+IdleTuningGcOnIdle
+        -Xdisableexplicitgc
+        -XX:+OptimizeStringConcat
+
     deploy:
       resources:
         limits:

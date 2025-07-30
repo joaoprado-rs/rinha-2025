@@ -1,4 +1,4 @@
-FROM openjdk:21-jdk-slim
+FROM ibm-semeru-runtimes:open-21-jre-focal
 
 WORKDIR /app
 

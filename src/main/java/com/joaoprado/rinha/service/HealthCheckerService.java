@@ -35,23 +35,8 @@ public class HealthCheckerService {
     }
 
     public CompletableFuture<PaymentProcessor> getBestProcessor() {
-        CompletableFuture<Boolean> isDefaultHealthy = redisService.isHealthy(PaymentProcessor.DEFAULT);
-        CompletableFuture<Boolean> isFallbackHealthy = redisService.isHealthy(PaymentProcessor.FALLBACK);
-
-        return isDefaultHealthy.thenCombine(isFallbackHealthy, (defaultHealthy, fallbackHealthy) -> {
-            if (defaultHealthy && fallbackHealthy) {
-                CompletableFuture<Long> defaultTime = redisService.getMinResponseTime(PaymentProcessor.DEFAULT);
-                CompletableFuture<Long> fallbackTime = redisService.getMinResponseTime(PaymentProcessor.FALLBACK);
-                return defaultTime.thenCombine(fallbackTime, (dt, ft) -> dt <= ft ? PaymentProcessor.DEFAULT : PaymentProcessor.FALLBACK);
-            } else if (defaultHealthy) {
-                return CompletableFuture.completedFuture(PaymentProcessor.DEFAULT);
-            } else if (fallbackHealthy) {
-                return CompletableFuture.completedFuture(PaymentProcessor.FALLBACK);
-            } else {
-                logger.log(Level.WARNING, "Both processors are unhealthy... Returning DEFAULT.");
-                return CompletableFuture.completedFuture(PaymentProcessor.DEFAULT);
-            }
-        }).thenCompose(future -> future);
+        return redisService.isHealthy(PaymentProcessor.DEFAULT)
+            .thenApply(defaultHealthy -> defaultHealthy ? PaymentProcessor.DEFAULT : PaymentProcessor.FALLBACK);
     }
 
     @Scheduled(fixedRate = 5000)
@@ -84,7 +69,7 @@ public class HealthCheckerService {
                 .uri(SERVICE_HEALTH)
                 .retrieve()
                 .bodyToMono(HealthCheckerResponse.class)
-                .timeout(Duration.ofSeconds(1))
+                .timeout(Duration.ofMillis(500))
                 .subscribe(
                         response -> {
                             boolean healthy = response != null && !response.failing();
