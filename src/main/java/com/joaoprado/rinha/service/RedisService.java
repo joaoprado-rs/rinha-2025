@@ -41,6 +41,16 @@ public class RedisService {
             .exceptionally(ex -> false);
   }
 
+  // Novo método 100% reativo para eliminar CompletableFuture
+  public reactor.core.publisher.Mono<Boolean> isHealthyReactive(PaymentProcessor processor) {
+    String processorName = processor.toString().toLowerCase();
+    return reactor.core.publisher.Mono.fromCompletionStage(
+        redis.hget(HEALTH_KEY, processorName + ":healthy")
+    )
+    .map("true"::equals)
+    .onErrorReturn(false);
+  }
+
   public void incrementPaymentCounter(PaymentProcessor paymentProcessor, PaymentRequest paymentRequest) {
     // Formato otimizado: armazenar como string simples "PROCESSOR:AMOUNT" para reduzir operações Redis
     String correlationId = paymentRequest.correlationId().toString();

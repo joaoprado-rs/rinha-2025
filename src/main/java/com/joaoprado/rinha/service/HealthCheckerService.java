@@ -42,13 +42,11 @@ public class HealthCheckerService {
     }
 
     public reactor.core.publisher.Mono<PaymentProcessor> getBestProcessor() {
-        // Retorna o último conhecido primeiro (fast path)
         if (healthCache.get(lastBestProcessor).get()) {
             return reactor.core.publisher.Mono.just(lastBestProcessor);
         }
 
-        // Fallback para o Redis apenas se necessário
-        return reactor.core.publisher.Mono.fromFuture(redisService.isHealthy(PaymentProcessor.DEFAULT))
+        return redisService.isHealthyReactive(PaymentProcessor.DEFAULT)
             .map(defaultHealthy -> {
                 PaymentProcessor best = defaultHealthy ? PaymentProcessor.DEFAULT : PaymentProcessor.FALLBACK;
                 lastBestProcessor = best;
@@ -56,7 +54,6 @@ public class HealthCheckerService {
             });
     }
 
-    // Reduzido de 5s para 10s para diminuir overhead durante alta carga
     @Scheduled(fixedRate = 10000)
     public void refresh() {
         String lockKey = "health-check-lock";
