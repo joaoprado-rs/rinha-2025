@@ -13,7 +13,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -22,9 +21,8 @@ public class PaymentWorker {
 
   private static final Logger logger = Logger.getLogger(PaymentWorker.class.getName());
 
-  // Configurações conservadoras para estabilidade máxima
-  private static final int WORKER_THREADS = 4; // Reduzido de 6 para 4
-  private static final int MAX_CONCURRENT = 100; // Reduzido de 300 para 100
+  private static final int WORKER_THREADS = 16; // Aumentado de 8 para 16
+  private static final int MAX_CONCURRENT = 800; // Aumentado de 500 para 800
 
   private final PaymentQueue queue;
   private final PaymentService paymentService;
@@ -73,6 +71,7 @@ public class PaymentWorker {
 
     while (!shutdown && !Thread.currentThread().isInterrupted()) {
       try {
+        // Reduzir timeout do semáforo para ser mais agressivo
         if (!semaphore.tryAcquire(1, TimeUnit.MILLISECONDS)) {
           continue;
         }
@@ -81,7 +80,8 @@ public class PaymentWorker {
           processPayment(request);
         } else {
           semaphore.release();
-          Thread.sleep(1);
+          // Eliminar completamente o sleep para máxima responsividade
+          Thread.yield(); // Apenas yield para dar chance a outras threads
         }
 
       } catch (PaymentQueueException ex) {
@@ -110,39 +110,34 @@ public class PaymentWorker {
         .thenCompose(processor ->
             paymentService.execute(request, processor)
                 .thenAccept(result -> {
-                    // Sucesso imediato - registra
                     registerPaymentsSummary(request, processor);
                 })
                 .exceptionally(ex -> {
-                    // Falha - tenta fallback de forma mais simples
                     PaymentProcessor fallback = (processor == PaymentProcessor.DEFAULT)
                         ? PaymentProcessor.FALLBACK : PaymentProcessor.DEFAULT;
-
-                    // Tentativa de fallback mais robusta
-                    paymentService.execute(request, fallback)
+                    return paymentService.execute(request, fallback)
                         .thenAccept(result -> registerPaymentsSummary(request, fallback))
                         .exceptionally(fallbackEx -> {
-                            // Log apenas se ambos falharam (DEBUG level)
-                            logger.log(Level.FINE, "Both processors failed for payment {0}", request.correlationId());
+                            logger.log(Level.WARNING, "Both processors failed for payment {0}: primary={1}, fallback={2}",
+                                new Object[]{request.correlationId(), ex.getMessage(), fallbackEx.getMessage()});
                             return null;
                         })
-                        .join(); // Aguarda o fallback completar para garantir registro
-                    return null;
+                        .join(); // Garante que o fallback seja processado sincronamente
                 })
         )
         .whenComplete((result, ex) -> {
-            // SEMPRE libera semáforo
-            semaphore.release();
+            semaphore.release(); // ✅ SEMPRE libera o semáforo
         });
   }
 
   private void registerPaymentsSummary(PaymentRequest request, PaymentProcessor processor) {
-    CompletableFuture.runAsync(() -> {
-      try {
-        redisService.incrementPaymentCounter(processor, request);
-      } catch (Exception ex) {
-      }
-    }, metricsExecutor);
+    // Registro síncrono para evitar inconsistências
+    try {
+      redisService.incrementPaymentCounter(processor, request);
+    } catch (Exception ex) {
+      logger.log(Level.WARNING, "Failed to register payment summary for {0}: {1}",
+          new Object[]{request.correlationId(), ex.getMessage()});
+    }
   }
 
   @PreDestroy

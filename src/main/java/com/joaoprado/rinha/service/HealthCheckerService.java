@@ -2,16 +2,15 @@ package com.joaoprado.rinha.service;
 
 import com.joaoprado.rinha.dto.HealthCheckerResponse;
 import com.joaoprado.rinha.pojo.PaymentProcessor;
-import com.joaoprado.rinha.worker.PaymentWorker;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -24,6 +23,10 @@ public class HealthCheckerService {
     private final WebClient fallbackClient;
     private final RedisService redisService;
 
+    // Cache local para reduzir consultas ao Redis
+    private final ConcurrentHashMap<PaymentProcessor, AtomicBoolean> healthCache = new ConcurrentHashMap<>();
+    private volatile PaymentProcessor lastBestProcessor = PaymentProcessor.DEFAULT;
+
     public HealthCheckerService(
             @Qualifier("defaultProcessorWebClient") WebClient defaultClient,
             @Qualifier("fallbackProcessorWebClient") WebClient fallbackClient,
@@ -32,51 +35,73 @@ public class HealthCheckerService {
         this.defaultClient = defaultClient;
         this.fallbackClient = fallbackClient;
         this.redisService = redisService;
+
+        // Inicializa cache
+        healthCache.put(PaymentProcessor.DEFAULT, new AtomicBoolean(true));
+        healthCache.put(PaymentProcessor.FALLBACK, new AtomicBoolean(true));
     }
 
     public CompletableFuture<PaymentProcessor> getBestProcessor() {
+        // Retorna o último conhecido primeiro (fast path)
+        if (healthCache.get(lastBestProcessor).get()) {
+            return CompletableFuture.completedFuture(lastBestProcessor);
+        }
+
+        // Fallback para o Redis apenas se necessário
         return redisService.isHealthy(PaymentProcessor.DEFAULT)
-            .thenApply(defaultHealthy -> defaultHealthy ? PaymentProcessor.DEFAULT : PaymentProcessor.FALLBACK);
+            .thenApply(defaultHealthy -> {
+                PaymentProcessor best = defaultHealthy ? PaymentProcessor.DEFAULT : PaymentProcessor.FALLBACK;
+                lastBestProcessor = best;
+                return best;
+            });
     }
 
-    @Scheduled(fixedRate = 5000)
+    // Reduzido de 5s para 10s para diminuir overhead durante alta carga
+    @Scheduled(fixedRate = 10000)
     public void refresh() {
-
         String lockKey = "health-check-lock";
         String lockValue = java.util.UUID.randomUUID().toString();
 
         redisService.redis.set(lockKey, lockValue,
-                io.lettuce.core.SetArgs.Builder.nx().px(3000))
+                io.lettuce.core.SetArgs.Builder.nx().px(8000)) // Lock por 8s
                 .thenAccept(result -> {
                     if ("OK".equals(result)) {
-                        logger.info("Acquired health check lock, performing refresh");
+                        // Log menos verboso
+                        logger.log(Level.FINE, "Performing health check refresh");
                         refreshProcessor(PaymentProcessor.DEFAULT);
                         refreshProcessor(PaymentProcessor.FALLBACK);
-                    } else {
-                        logger.fine("Another instance is performing health check, skipping");
                     }
+                    // Remove log quando não consegue lock para reduzir ruído
                 })
                 .exceptionally(ex -> {
-                    logger.warning("Failed to acquire health check lock: " + ex.getMessage());
+                    logger.log(Level.WARNING, "Health check lock failed: {0}", ex.getMessage());
                     return null;
                 });
     }
 
     private void refreshProcessor(PaymentProcessor processor) {
-        logger.info("Refreshing processor '" + processor + "' at: " + LocalDateTime.now());
         WebClient client = (processor == PaymentProcessor.DEFAULT) ? defaultClient : fallbackClient;
         client.get()
                 .uri(SERVICE_HEALTH)
                 .retrieve()
                 .bodyToMono(HealthCheckerResponse.class)
-                .timeout(Duration.ofMillis(500))
+                .timeout(Duration.ofMillis(1000)) // Aumentado para 1s para ser mais tolerante
                 .subscribe(
                         response -> {
                             boolean healthy = response != null && !response.failing();
                             long minTime = response != null ? response.minResponseTime() : Long.MAX_VALUE;
+
+                            // Atualiza cache local
+                            healthCache.get(processor).set(healthy);
+
+                            // Atualiza Redis
                             redisService.setHealthStatus(processor, healthy, minTime);
                         },
-                        error -> redisService.setHealthStatus(processor, false, Long.MAX_VALUE)
+                        error -> {
+                            // Marca como não saudável no cache
+                            healthCache.get(processor).set(false);
+                            redisService.setHealthStatus(processor, false, Long.MAX_VALUE);
+                        }
                 );
     }
 }

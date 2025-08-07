@@ -6,27 +6,21 @@ import com.joaoprado.rinha.pojo.PaymentProcessor;
 import io.lettuce.core.RedisFuture;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
-import io.lettuce.core.api.sync.RedisCommands;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.stream.Collectors;
-import java.util.stream.LongStream;
 
 @Service
 public class RedisService {
   public final RedisAsyncCommands<String, String> redis;
   private static final String HEALTH_KEY = "health:status";
 
-  public RedisService(StatefulRedisConnection redis) {
+  public RedisService(StatefulRedisConnection<String, String> redis) {
     this.redis = redis.async();
   }
 
@@ -43,16 +37,8 @@ public class RedisService {
     String processorName = processor.toString().toLowerCase();
     return redis.hget(HEALTH_KEY, processorName + ":healthy")
             .toCompletableFuture()
-            .thenApply(s -> "true".equals(s))
+            .thenApply("true"::equals)
             .exceptionally(ex -> false);
-  }
-
-  public CompletableFuture<Long> getMinResponseTime(PaymentProcessor processor) {
-    String processorName = processor.toString().toLowerCase();
-    return redis.hget(HEALTH_KEY, processorName + ":responseTime")
-            .toCompletableFuture()
-            .thenApply(s -> s != null ? Long.parseLong(s) : Long.MAX_VALUE)
-            .exceptionally(ex -> Long.MAX_VALUE);
   }
 
   public void incrementPaymentCounter(PaymentProcessor paymentProcessor, PaymentRequest paymentRequest) {
@@ -81,45 +67,66 @@ public class RedisService {
   public Map<String, PaymentSummaryResponse.PaymentStats> generatePaymentStats(long startMillis, long endMillis) throws Exception {
     Map<String, PaymentSummaryResponse.PaymentStats> result = new HashMap<>();
 
-    // Timeout mais agressivo para evitar travamentos
-    List<String> ids = redis.zrangebyscore("payments:by_timestamp", (double) startMillis, (double) endMillis)
-        .get(500, TimeUnit.MILLISECONDS); // Reduzido de 1s para 500ms
+    // Timeout mais realista
+    List<String> ids = redis.zrangebyscore("payments:by_timestamp", startMillis, endMillis)
+        .get(2, TimeUnit.SECONDS);
 
-    // Limitar processamento para evitar sobrecarga
-    if (ids.size() > 10000) {
-      ids = ids.subList(0, 10000); // Processa no máximo 10k pagamentos
+    if (ids.isEmpty()) {
+      result.put("default", new PaymentSummaryResponse.PaymentStats(0, 0.0));
+      result.put("fallback", new PaymentSummaryResponse.PaymentStats(0, 0.0));
+      return result;
     }
 
-    List<CompletableFuture<Map<String, String>>> futures = ids.stream()
-        .map(id -> redis.hgetall("payment:" + id).toCompletableFuture())
-        .collect(Collectors.toList());
-
+    // Processa em batches para evitar sobrecarga
+    int batchSize = 1000;
     int countDefault = 0;
     double amountDefault = 0;
     int countFallback = 0;
     double amountFallback = 0;
 
-    // Timeout por future também
-    for (int i = 0; i < ids.size(); i++) {
-      try {
-        Map<String, String> data = futures.get(i).get(50, TimeUnit.MILLISECONDS); // Timeout agressivo por item
+    for (int i = 0; i < ids.size(); i += batchSize) {
+      int endIndex = Math.min(i + batchSize, ids.size());
+      List<String> batch = ids.subList(i, endIndex);
+      
+      // Usar pipeline para operações em batch
+      List<RedisFuture<Map<String, String>>> futures = batch.stream()
+          .map(id -> redis.hgetall("payment:" + id))
+          .toList();
 
-        if (data == null || data.isEmpty()) {
-          continue;
-        }
+      // Aguarda todas as operações do batch com timeout razoável
+      CompletableFuture.allOf(futures.stream()
+          .map(RedisFuture::toCompletableFuture)
+          .toArray(CompletableFuture[]::new))
+          .get(3, TimeUnit.SECONDS);
 
-        if ("DEFAULT".equals(data.get("processor"))) {
-          countDefault++;
-          amountDefault += Double.parseDouble(data.get("amount"));
-        } else {
-          countFallback++;
-          amountFallback += Double.parseDouble(data.get("amount"));
+      // Processa resultados do batch
+      for (RedisFuture<Map<String, String>> future : futures) {
+        try {
+          Map<String, String> data = future.get(100, TimeUnit.MILLISECONDS);
+
+          if (data == null || data.isEmpty()) {
+            continue;
+          }
+
+          String processor = data.get("processor");
+          String amountStr = data.get("amount");
+          
+          if (processor != null && amountStr != null) {
+            double amount = Double.parseDouble(amountStr);
+            if ("DEFAULT".equals(processor)) {
+              countDefault++;
+              amountDefault += amount;
+            } else if ("FALLBACK".equals(processor)) {
+              countFallback++;
+              amountFallback += amount;
+            }
+          }
+        } catch (Exception ex) {
+          // Log e continua processando outros itens
         }
-      } catch (TimeoutException ex) {
-        // Skip este pagamento se demorar muito
-        continue;
       }
     }
+
     result.put("default", new PaymentSummaryResponse.PaymentStats(countDefault, amountDefault));
     result.put("fallback", new PaymentSummaryResponse.PaymentStats(countFallback, amountFallback));
     return result;
