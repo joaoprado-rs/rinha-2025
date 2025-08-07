@@ -1,6 +1,5 @@
 package com.joaoprado.rinha.service;
 
-import com.joaoprado.rinha.config.WebClientConfig;
 import com.joaoprado.rinha.dto.PaymentRequest;
 import com.joaoprado.rinha.pojo.PaymentProcessor;
 import org.springframework.beans.factory.annotation.Qualifier;

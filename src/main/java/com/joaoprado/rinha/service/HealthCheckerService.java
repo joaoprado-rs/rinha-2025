@@ -23,6 +23,7 @@ public class HealthCheckerService {
     private final WebClient fallbackClient;
     private final RedisService redisService;
 
+    // Cache local para reduzir consultas ao Redis
     private final ConcurrentHashMap<PaymentProcessor, AtomicBoolean> healthCache = new ConcurrentHashMap<>();
     private volatile PaymentProcessor lastBestProcessor = PaymentProcessor.DEFAULT;
 
@@ -35,15 +36,18 @@ public class HealthCheckerService {
         this.fallbackClient = fallbackClient;
         this.redisService = redisService;
 
+        // Inicializa cache
         healthCache.put(PaymentProcessor.DEFAULT, new AtomicBoolean(true));
         healthCache.put(PaymentProcessor.FALLBACK, new AtomicBoolean(true));
     }
 
     public reactor.core.publisher.Mono<PaymentProcessor> getBestProcessor() {
+        // Retorna o último conhecido primeiro (fast path)
         if (healthCache.get(lastBestProcessor).get()) {
             return reactor.core.publisher.Mono.just(lastBestProcessor);
         }
 
+        // Fallback para o Redis apenas se necessário
         return reactor.core.publisher.Mono.fromFuture(redisService.isHealthy(PaymentProcessor.DEFAULT))
             .map(defaultHealthy -> {
                 PaymentProcessor best = defaultHealthy ? PaymentProcessor.DEFAULT : PaymentProcessor.FALLBACK;
@@ -52,6 +56,7 @@ public class HealthCheckerService {
             });
     }
 
+    // Reduzido de 5s para 10s para diminuir overhead durante alta carga
     @Scheduled(fixedRate = 10000)
     public void refresh() {
         String lockKey = "health-check-lock";
@@ -61,10 +66,12 @@ public class HealthCheckerService {
                 io.lettuce.core.SetArgs.Builder.nx().px(8000)) // Lock por 8s
                 .thenAccept(result -> {
                     if ("OK".equals(result)) {
+                        // Log menos verboso
                         logger.log(Level.FINE, "Performing health check refresh");
                         refreshProcessor(PaymentProcessor.DEFAULT);
                         refreshProcessor(PaymentProcessor.FALLBACK);
                     }
+                    // Remove log quando não consegue lock para reduzir ruído
                 })
                 .exceptionally(ex -> {
                     logger.log(Level.WARNING, "Health check lock failed: {0}", ex.getMessage());
@@ -78,7 +85,7 @@ public class HealthCheckerService {
                 .uri(SERVICE_HEALTH)
                 .retrieve()
                 .bodyToMono(HealthCheckerResponse.class)
-                .timeout(Duration.ofMillis(1000))
+                .timeout(Duration.ofMillis(1000)) // Aumentado para 1s para ser mais tolerante
                 .subscribe(
                         response -> {
                             boolean healthy = response != null && !response.failing();
