@@ -19,21 +19,22 @@ public class WebClientConfig {
     @Bean
     public ConnectionProvider connectionProvider() {
         return ConnectionProvider.builder("payment-processor-pool")
-            .maxConnections(100) // Pool maior para alta carga
-            .maxIdleTime(Duration.ofSeconds(30)) // Keep connections alive
-            .maxLifeTime(Duration.ofMinutes(5)) // Recycle connections
-            .pendingAcquireTimeout(Duration.ofMillis(500)) // Timeout para pegar conexão
-            .evictInBackground(Duration.ofSeconds(60)) // Cleanup background
+            .maxConnections(500)
+            .maxIdleTime(Duration.ofSeconds(20))
+            .maxLifeTime(Duration.ofMinutes(2))
+            .pendingAcquireTimeout(Duration.ofSeconds(2))
+            .pendingAcquireMaxCount(1000)
+            .evictInBackground(Duration.ofSeconds(30))
             .build();
     }
 
     @Bean
     public HttpClient httpClient(ConnectionProvider connectionProvider) {
         return HttpClient.create(connectionProvider)
-            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 1000) // 1s connect timeout
-            .option(ChannelOption.SO_KEEPALIVE, true) // TCP keepalive
-            .option(ChannelOption.TCP_NODELAY, true) // Disable Nagle algorithm
-            .responseTimeout(Duration.ofSeconds(3)) // 3s response timeout
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 1000)
+            .option(ChannelOption.SO_KEEPALIVE, true)
+            .option(ChannelOption.TCP_NODELAY, true)
+            .responseTimeout(Duration.ofSeconds(3))
             .doOnConnected(conn -> {
                 conn.addHandlerLast(new ReadTimeoutHandler(2, TimeUnit.SECONDS));
                 conn.addHandlerLast(new WriteTimeoutHandler(1, TimeUnit.SECONDS));
@@ -46,8 +47,8 @@ public class WebClientConfig {
             .baseUrl("http://payment-processor-default:8080")
             .clientConnector(new ReactorClientHttpConnector(httpClient))
             .codecs(configurer -> {
-                configurer.defaultCodecs().maxInMemorySize(256 * 1024); // 256KB (menor)
-                configurer.defaultCodecs().enableLoggingRequestDetails(false); // No logging
+                configurer.defaultCodecs().maxInMemorySize(256 * 1024);
+                configurer.defaultCodecs().enableLoggingRequestDetails(false);
             })
             .build();
     }
@@ -58,8 +59,8 @@ public class WebClientConfig {
             .baseUrl("http://payment-processor-fallback:8080")
             .clientConnector(new ReactorClientHttpConnector(httpClient))
             .codecs(configurer -> {
-                configurer.defaultCodecs().maxInMemorySize(256 * 1024); // 256KB (menor)
-                configurer.defaultCodecs().enableLoggingRequestDetails(false); // No logging
+                configurer.defaultCodecs().maxInMemorySize(256 * 1024);
+                configurer.defaultCodecs().enableLoggingRequestDetails(false);
             })
             .build();
     }

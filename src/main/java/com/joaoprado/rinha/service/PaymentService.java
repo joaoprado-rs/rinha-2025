@@ -11,7 +11,6 @@ import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
 @Service
@@ -31,7 +30,7 @@ public class PaymentService {
     this.fallbackClient = fallbackClient;
   }
 
-  public CompletableFuture<Void> execute(PaymentRequest paymentRequest, PaymentProcessor processor) {
+  public Mono<Void> execute(PaymentRequest paymentRequest, PaymentProcessor processor) {
     WebClient client = PaymentProcessor.DEFAULT.equals(processor) ? defaultClient : fallbackClient;
 
     return client
@@ -40,11 +39,10 @@ public class PaymentService {
         .body(Mono.just(paymentRequest), PaymentRequest.class)
         .retrieve()
         .toBodilessEntity()
-        .timeout(Duration.ofMillis(600))  // Timeout mais agressivo
-        .retryWhen(Retry.backoff(2, Duration.ofMillis(50))  // Retry rápido 2x
-            .filter(throwable -> !(throwable instanceof WebClientResponseException.BadRequest))) // Não retry em 400
+        .timeout(Duration.ofMillis(200))
+        .retryWhen(Retry.backoff(1, Duration.ofMillis(10))
+            .filter(throwable -> !(throwable instanceof WebClientResponseException.BadRequest)))
         .then()
-        .doOnError(ex -> logger.fine("Payment failed for " + paymentRequest.correlationId() + ": " + ex.getClass().getSimpleName()))
-        .toFuture();
+        .doOnError(ex -> logger.fine("Payment failed for " + paymentRequest.correlationId() + ": " + ex.getClass().getSimpleName()));
   }
 }

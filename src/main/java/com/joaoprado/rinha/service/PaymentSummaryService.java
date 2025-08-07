@@ -1,9 +1,8 @@
 package com.joaoprado.rinha.service;
 
 import com.joaoprado.rinha.dto.PaymentSummaryResponse;
-import com.joaoprado.rinha.queue.PaymentQueue;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 @Service
 public class PaymentSummaryService {
@@ -12,6 +11,10 @@ public class PaymentSummaryService {
 
     PaymentSummaryService(RedisService redisService) {
         this.redisService = redisService;
+    }
+
+    public Mono<PaymentSummaryResponse> retrievePaymentSummaryReactive(String from, String to) {
+        return redisService.getPaymentSummaryReactive(from, to);
     }
 
     public PaymentSummaryResponse retrievePaymentSummary(String from, String to) throws Exception {

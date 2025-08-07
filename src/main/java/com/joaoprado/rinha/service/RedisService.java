@@ -42,15 +42,14 @@ public class RedisService {
   }
 
   public void incrementPaymentCounter(PaymentProcessor paymentProcessor, PaymentRequest paymentRequest) {
-    String key = "payment:" + paymentRequest.correlationId();
-    Map<String, String> paymentData = Map.of(
-        "processor", paymentProcessor.toString().toUpperCase(),
-        "amount", String.valueOf(paymentRequest.amount()),
-        "timestamp", String.valueOf(Instant.parse(paymentRequest.requestedAt()).toEpochMilli())
-    );
-    redis.hset(key, paymentData);
+    // Formato otimizado: armazenar como string simples "PROCESSOR:AMOUNT" para reduzir operações Redis
+    String correlationId = paymentRequest.correlationId().toString();
     long timestamp = Instant.parse(paymentRequest.requestedAt()).toEpochMilli();
-    redis.zadd("payments:by_timestamp", (double) timestamp, paymentRequest.correlationId().toString());
+    String paymentData = paymentProcessor.toString().toUpperCase() + ":" + paymentRequest.amount();
+
+    // Duas operações otimizadas em vez de múltiplas
+    redis.set("payment:" + correlationId, paymentData);
+    redis.zadd("payments:by_timestamp", (double) timestamp, correlationId);
   }
 
 
@@ -67,7 +66,7 @@ public class RedisService {
   public Map<String, PaymentSummaryResponse.PaymentStats> generatePaymentStats(long startMillis, long endMillis) throws Exception {
     Map<String, PaymentSummaryResponse.PaymentStats> result = new HashMap<>();
 
-    // Timeout mais realista
+    // Buscar IDs no intervalo de tempo
     List<String> ids = redis.zrangebyscore("payments:by_timestamp", startMillis, endMillis)
         .get(2, TimeUnit.SECONDS);
 
@@ -77,42 +76,39 @@ public class RedisService {
       return result;
     }
 
-    // Processa em batches para evitar sobrecarga
-    int batchSize = 1000;
+    // Contadores para processamento
     int countDefault = 0;
     double amountDefault = 0;
     int countFallback = 0;
     double amountFallback = 0;
 
+    // Processar em batches para melhor performance
+    int batchSize = 1000;
     for (int i = 0; i < ids.size(); i += batchSize) {
       int endIndex = Math.min(i + batchSize, ids.size());
       List<String> batch = ids.subList(i, endIndex);
       
-      // Usar pipeline para operações em batch
-      List<RedisFuture<Map<String, String>>> futures = batch.stream()
-          .map(id -> redis.hgetall("payment:" + id))
+      // Usar get() para o novo formato otimizado "PROCESSOR:AMOUNT"
+      List<RedisFuture<String>> futures = batch.stream()
+          .map(id -> redis.get("payment:" + id))
           .toList();
 
-      // Aguarda todas as operações do batch com timeout razoável
+      // Aguardar todas as operações do batch
       CompletableFuture.allOf(futures.stream()
           .map(RedisFuture::toCompletableFuture)
           .toArray(CompletableFuture[]::new))
           .get(3, TimeUnit.SECONDS);
 
-      // Processa resultados do batch
-      for (RedisFuture<Map<String, String>> future : futures) {
+      // Processar resultados do batch com novo formato "PROCESSOR:AMOUNT"
+      for (RedisFuture<String> future : futures) {
         try {
-          Map<String, String> data = future.get(100, TimeUnit.MILLISECONDS);
+          String data = future.get(100, TimeUnit.MILLISECONDS);
 
-          if (data == null || data.isEmpty()) {
-            continue;
-          }
+          if (data != null && data.contains(":")) {
+            String[] parts = data.split(":", 2);
+            String processor = parts[0];
+            double amount = Double.parseDouble(parts[1]);
 
-          String processor = data.get("processor");
-          String amountStr = data.get("amount");
-          
-          if (processor != null && amountStr != null) {
-            double amount = Double.parseDouble(amountStr);
             if ("DEFAULT".equals(processor)) {
               countDefault++;
               amountDefault += amount;
@@ -122,7 +118,7 @@ public class RedisService {
             }
           }
         } catch (Exception ex) {
-          // Log e continua processando outros itens
+          // Continua processando outros itens
         }
       }
     }
@@ -130,5 +126,70 @@ public class RedisService {
     result.put("default", new PaymentSummaryResponse.PaymentStats(countDefault, amountDefault));
     result.put("fallback", new PaymentSummaryResponse.PaymentStats(countFallback, amountFallback));
     return result;
+  }
+
+  public reactor.core.publisher.Mono<Map<String, PaymentSummaryResponse.PaymentStats>> generatePaymentStatsReactive(long startMillis, long endMillis) {
+    // Converter para pipeline 100% reativo
+    return reactor.core.publisher.Mono.fromFuture(
+        redis.zrangebyscore("payments:by_timestamp", startMillis, endMillis).toCompletableFuture()
+    )
+    .flatMap(ids -> {
+      if (ids.isEmpty()) {
+        Map<String, PaymentSummaryResponse.PaymentStats> emptyResult = Map.of(
+            "default", new PaymentSummaryResponse.PaymentStats(0, 0.0),
+            "fallback", new PaymentSummaryResponse.PaymentStats(0, 0.0)
+        );
+        return reactor.core.publisher.Mono.just(emptyResult);
+      }
+
+      // Processar todos os IDs em paralelo de forma reativa
+      return reactor.core.publisher.Flux.fromIterable(ids)
+          .flatMap(id ->
+              reactor.core.publisher.Mono.fromFuture(redis.get("payment:" + id).toCompletableFuture())
+                  .onErrorReturn("") // Ignorar erros individuais
+          )
+          .filter(data -> data != null && data.contains(":"))
+          .map(data -> {
+              String[] parts = data.split(":", 2);
+              return new PaymentData(parts[0], Double.parseDouble(parts[1]));
+          })
+          .collectList()
+          .map(this::aggregatePaymentData);
+    });
+  }
+
+  // Método auxiliar para agregação
+  private Map<String, PaymentSummaryResponse.PaymentStats> aggregatePaymentData(java.util.List<PaymentData> payments) {
+    int countDefault = 0, countFallback = 0;
+    double amountDefault = 0, amountFallback = 0;
+
+    for (PaymentData payment : payments) {
+      if ("DEFAULT".equals(payment.processor)) {
+        countDefault++;
+        amountDefault += payment.amount;
+      } else if ("FALLBACK".equals(payment.processor)) {
+        countFallback++;
+        amountFallback += payment.amount;
+      }
+    }
+
+    return Map.of(
+        "default", new PaymentSummaryResponse.PaymentStats(countDefault, amountDefault),
+        "fallback", new PaymentSummaryResponse.PaymentStats(countFallback, amountFallback)
+    );
+  }
+
+  // Record auxiliar para dados de pagamento
+  private record PaymentData(String processor, double amount) {}
+
+  public reactor.core.publisher.Mono<PaymentSummaryResponse> getPaymentSummaryReactive(String from, String to) {
+    long startTime = java.time.Instant.parse(from).toEpochMilli();
+    long endTime = java.time.Instant.parse(to).toEpochMilli();
+
+    return generatePaymentStatsReactive(startTime, endTime)
+        .map(stats -> new PaymentSummaryResponse(
+            stats.get("default"),
+            stats.get("fallback")
+        ));
   }
 }

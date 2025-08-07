@@ -2,31 +2,21 @@ package com.joaoprado.rinha.queue;
 
 import com.joaoprado.rinha.dto.PaymentRequest;
 import org.springframework.stereotype.Component;
-
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Sinks;
 
 @Component
 public class PaymentQueue {
-    BlockingQueue<PaymentRequest> queue = new LinkedBlockingQueue<>();
+    private final Sinks.Many<PaymentRequest> sink = Sinks.many().multicast().onBackpressureBuffer();
 
-   public void enqueue(PaymentRequest paymentRequest) {
-      try {
-         queue.add(paymentRequest);
-      } catch (Exception e) {
-          throw new PaymentQueueException(e.getMessage());
-      }
-   }
+    public void enqueue(PaymentRequest paymentRequest) {
+        Sinks.EmitResult result = sink.tryEmitNext(paymentRequest);
+        if (result.isFailure()) {
+            throw new PaymentQueueException("Failed to emit payment: " + result);
+        }
+    }
 
-   public PaymentRequest dequeue() {
-       try {
-           return queue.poll(1, TimeUnit.SECONDS);
-       } catch (InterruptedException e) {
-           Thread.currentThread().interrupt();
-           throw new PaymentQueueException("Thread interrupted while waiting for payment");
-       } catch (Exception e) {
-           throw new PaymentQueueException(e.getMessage());
-       }
-   }
+    public Flux<PaymentRequest> getPaymentStream() {
+        return sink.asFlux();
+    }
 }

@@ -18,11 +18,11 @@ x-api-templates:
         -Xquickstart
         -Xgc:concurrentScavenge
         -Xdisableexplicitgc
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: "150MB"
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: '0.5'
+#          memory: "150MB"
 
 
 services:
@@ -49,11 +49,11 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
-    deploy:
-      resources:
-        limits:
-          cpus: '0.3'
-          memory: "30MB"
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: '0.3'
+#          memory: "30MB"
 
 
   nginx:
@@ -68,11 +68,11 @@ services:
       - api-2
     networks:
       - backend
-    deploy:
-      resources:
-        limits:
-          cpus: '0.2'
-          memory: "20MB"
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: '0.2'
+#          memory: "20MB"
 
 networks:
   backend:
