@@ -1,7 +1,6 @@
 x-api-templates:
   app: &api-template
-
-    build: .
+    image: mrprince2/rinha-java-1:latest
     depends_on:
       - redis
     networks:
@@ -18,6 +17,8 @@ x-api-templates:
         -Xquickstart
         -Xgc:concurrentScavenge
         -Xdisableexplicitgc
+      PAYMENT_PROCESSOR_DEFAULT_URL: "http://payment-processor-default:8080"
+      PAYMENT_PROCESSOR_FALLBACK_URL: "http://payment-processor-fallback:8080"
     deploy:
       resources:
         limits:

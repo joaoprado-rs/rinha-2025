@@ -2,7 +2,6 @@ package com.joaoprado.rinha.queue;
 
 import com.joaoprado.rinha.dto.PaymentRequest;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.BufferOverflowStrategy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 

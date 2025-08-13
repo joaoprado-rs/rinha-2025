@@ -34,7 +34,8 @@ public class PaymentService {
   public Mono<Void> execute(PaymentRequest paymentRequest, PaymentProcessor processor) {
     WebClient client = PaymentProcessor.DEFAULT.equals(processor) ? defaultClient : fallbackClient;
     long minResponseTime = healthCheckerService.getMinResponseTime(processor);
-    Duration dynamicTimeout = Duration.ofMillis(minResponseTime + 200L);
+    long timeoutValue = Math.min(minResponseTime + 200L, 1000L); // Cap timeout at 1000ms (1s)
+    Duration dynamicTimeout = Duration.ofMillis(timeoutValue);
 
     return client
         .post()

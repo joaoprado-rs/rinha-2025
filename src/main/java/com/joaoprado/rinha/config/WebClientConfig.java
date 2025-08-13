@@ -34,17 +34,14 @@ public class WebClientConfig {
             .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 1000)
             .option(ChannelOption.SO_KEEPALIVE, true)
             .option(ChannelOption.TCP_NODELAY, true)
-            .responseTimeout(Duration.ofSeconds(3))
-            .doOnConnected(conn -> {
-                conn.addHandlerLast(new ReadTimeoutHandler(2, TimeUnit.SECONDS));
-                conn.addHandlerLast(new WriteTimeoutHandler(1, TimeUnit.SECONDS));
-            });
+            .responseTimeout(Duration.ofSeconds(3));
     }
 
     @Bean("defaultProcessorWebClient")
     public WebClient defaultProcessorWebClient(HttpClient httpClient) {
+        String defaultUrl = System.getenv("PAYMENT_PROCESSOR_DEFAULT_URL").trim();
         return WebClient.builder()
-            .baseUrl("http://payment-processor-default:8080")
+            .baseUrl(defaultUrl)
             .clientConnector(new ReactorClientHttpConnector(httpClient))
             .codecs(configurer -> {
                 configurer.defaultCodecs().maxInMemorySize(256 * 1024);
@@ -55,8 +52,9 @@ public class WebClientConfig {
 
     @Bean("fallbackProcessorWebClient")
     public WebClient fallbackProcessorWebClient(HttpClient httpClient) {
+        String fallbackUrl = System.getenv("PAYMENT_PROCESSOR_FALLBACK_URL").trim();
         return WebClient.builder()
-            .baseUrl("http://payment-processor-fallback:8080")
+            .baseUrl(fallbackUrl)
             .clientConnector(new ReactorClientHttpConnector(httpClient))
             .codecs(configurer -> {
                 configurer.defaultCodecs().maxInMemorySize(256 * 1024);

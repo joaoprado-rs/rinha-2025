@@ -41,7 +41,6 @@ public class RedisService {
             .exceptionally(ex -> false);
   }
 
-  // Novo método 100% reativo para eliminar CompletableFuture
   public reactor.core.publisher.Mono<Boolean> isHealthyReactive(PaymentProcessor processor) {
     String processorName = processor.toString().toLowerCase();
     return reactor.core.publisher.Mono.fromCompletionStage(
@@ -76,7 +75,6 @@ public class RedisService {
   public Map<String, PaymentSummaryResponse.PaymentStats> generatePaymentStats(long startMillis, long endMillis) throws Exception {
     Map<String, PaymentSummaryResponse.PaymentStats> result = new HashMap<>();
 
-    // Buscar IDs no intervalo de tempo
     List<String> ids = redis.zrangebyscore("payments:by_timestamp", startMillis, endMillis)
         .get(2, TimeUnit.SECONDS);
 
@@ -86,30 +84,25 @@ public class RedisService {
       return result;
     }
 
-    // Contadores para processamento
     int countDefault = 0;
     double amountDefault = 0;
     int countFallback = 0;
     double amountFallback = 0;
 
-    // Processar em batches para melhor performance
     int batchSize = 1000;
     for (int i = 0; i < ids.size(); i += batchSize) {
       int endIndex = Math.min(i + batchSize, ids.size());
       List<String> batch = ids.subList(i, endIndex);
-      
-      // Usar get() para o novo formato otimizado "PROCESSOR:AMOUNT"
+
       List<RedisFuture<String>> futures = batch.stream()
           .map(id -> redis.get("payment:" + id))
           .toList();
 
-      // Aguardar todas as operações do batch
       CompletableFuture.allOf(futures.stream()
           .map(RedisFuture::toCompletableFuture)
           .toArray(CompletableFuture[]::new))
           .get(3, TimeUnit.SECONDS);
 
-      // Processar resultados do batch com novo formato "PROCESSOR:AMOUNT"
       for (RedisFuture<String> future : futures) {
         try {
           String data = future.get(100, TimeUnit.MILLISECONDS);
@@ -128,7 +121,6 @@ public class RedisService {
             }
           }
         } catch (Exception ex) {
-          // Continua processando outros itens
         }
       }
     }
@@ -139,7 +131,6 @@ public class RedisService {
   }
 
   public reactor.core.publisher.Mono<Map<String, PaymentSummaryResponse.PaymentStats>> generatePaymentStatsReactive(long startMillis, long endMillis) {
-    // Converter para pipeline 100% reativo
     return reactor.core.publisher.Mono.fromFuture(
         redis.zrangebyscore("payments:by_timestamp", startMillis, endMillis).toCompletableFuture()
     )
@@ -152,11 +143,10 @@ public class RedisService {
         return reactor.core.publisher.Mono.just(emptyResult);
       }
 
-      // Processar todos os IDs em paralelo de forma reativa
       return reactor.core.publisher.Flux.fromIterable(ids)
           .flatMap(id ->
               reactor.core.publisher.Mono.fromFuture(redis.get("payment:" + id).toCompletableFuture())
-                  .onErrorReturn("") // Ignorar erros individuais
+                  .onErrorReturn("")
           )
           .filter(data -> data != null && data.contains(":"))
           .map(data -> {
@@ -168,7 +158,6 @@ public class RedisService {
     });
   }
 
-  // Método auxiliar para agregação
   private Map<String, PaymentSummaryResponse.PaymentStats> aggregatePaymentData(java.util.List<PaymentData> payments) {
     int countDefault = 0, countFallback = 0;
     double amountDefault = 0, amountFallback = 0;
@@ -189,7 +178,6 @@ public class RedisService {
     );
   }
 
-  // Record auxiliar para dados de pagamento
   private record PaymentData(String processor, double amount) {}
 
   public reactor.core.publisher.Mono<PaymentSummaryResponse> getPaymentSummaryReactive(String from, String to) {
