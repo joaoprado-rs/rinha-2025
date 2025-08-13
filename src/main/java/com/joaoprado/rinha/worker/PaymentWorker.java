@@ -58,21 +58,19 @@ public class PaymentWorker {
   }
 
   private reactor.core.publisher.Mono<Void> processPaymentReactive(PaymentRequest request) {
-    return healthChecker.getBestProcessor()
-        .flatMap(processor ->
-            paymentService.execute(request, processor)
-                .then(Mono.fromRunnable(() -> redisService.incrementPaymentCounter(processor, request)))
-                .onErrorResume(ex -> {
-                    PaymentProcessor fallback = (processor == PaymentProcessor.DEFAULT)
-                        ? PaymentProcessor.FALLBACK : PaymentProcessor.DEFAULT;
-                    return paymentService.execute(request, fallback)
-                        .then(Mono.fromRunnable(() -> redisService.incrementPaymentCounter(fallback, request)))
-                        .onErrorResume(fallbackEx -> {
-                            logger.log(Level.WARNING, "Both processors failed for payment {0}", request.correlationId());
-                            return Mono.empty();
-                        });
-                })
-        ).then();
+    PaymentProcessor processor = healthChecker.getBestProcessor();
+    return paymentService.execute(request, processor)
+        .then(Mono.fromRunnable(() -> redisService.incrementPaymentCounter(processor, request)))
+        .onErrorResume(ex -> {
+            PaymentProcessor fallback = (processor == PaymentProcessor.DEFAULT)
+                ? PaymentProcessor.FALLBACK : PaymentProcessor.DEFAULT;
+            return paymentService.execute(request, fallback)
+                .then(Mono.fromRunnable(() -> redisService.incrementPaymentCounter(fallback, request)))
+                .onErrorResume(fallbackEx -> {
+                    logger.log(Level.WARNING, "Both processors failed for payment {0}", request.correlationId());
+                    return Mono.empty();
+                });
+        }).then();
   }
 
   @PreDestroy

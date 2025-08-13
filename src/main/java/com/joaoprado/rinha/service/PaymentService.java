@@ -21,16 +21,20 @@ public class PaymentService {
 
   private final WebClient defaultClient;
   private final WebClient fallbackClient;
+  private final HealthCheckerService healthCheckerService;
 
   public PaymentService(
       @Qualifier("defaultProcessorWebClient") WebClient defaultClient,
-      @Qualifier("fallbackProcessorWebClient") WebClient fallbackClient) {
+      @Qualifier("fallbackProcessorWebClient") WebClient fallbackClient, HealthCheckerService healthCheckerService) {
     this.defaultClient = defaultClient;
     this.fallbackClient = fallbackClient;
+    this.healthCheckerService = healthCheckerService;
   }
 
   public Mono<Void> execute(PaymentRequest paymentRequest, PaymentProcessor processor) {
     WebClient client = PaymentProcessor.DEFAULT.equals(processor) ? defaultClient : fallbackClient;
+    long minResponseTime = healthCheckerService.getMinResponseTime(processor);
+    Duration dynamicTimeout = Duration.ofMillis(minResponseTime + 200L);
 
     return client
         .post()
@@ -38,7 +42,7 @@ public class PaymentService {
         .body(Mono.just(paymentRequest), PaymentRequest.class)
         .retrieve()
         .toBodilessEntity()
-        .timeout(Duration.ofMillis(300))
+        .timeout(dynamicTimeout)
         .retryWhen(Retry.backoff(1, Duration.ofMillis(10))
             .filter(throwable -> !(throwable instanceof WebClientResponseException.BadRequest)))
         .then()

@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
@@ -25,6 +24,7 @@ public class HealthCheckerService {
 
     // Cache local para reduzir consultas ao Redis
     private final ConcurrentHashMap<PaymentProcessor, AtomicBoolean> healthCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<PaymentProcessor, Long> responseTimeCache = new ConcurrentHashMap<>();
     private volatile PaymentProcessor lastBestProcessor = PaymentProcessor.DEFAULT;
 
     public HealthCheckerService(
@@ -39,19 +39,31 @@ public class HealthCheckerService {
         // Inicializa cache
         healthCache.put(PaymentProcessor.DEFAULT, new AtomicBoolean(true));
         healthCache.put(PaymentProcessor.FALLBACK, new AtomicBoolean(true));
+        responseTimeCache.put(PaymentProcessor.DEFAULT, 300L);
+        responseTimeCache.put(PaymentProcessor.FALLBACK, 300L);
     }
 
-    public reactor.core.publisher.Mono<PaymentProcessor> getBestProcessor() {
-        if (healthCache.get(lastBestProcessor).get()) {
-            return reactor.core.publisher.Mono.just(lastBestProcessor);
-        }
+    public long getMinResponseTime(PaymentProcessor processor) {
+        return responseTimeCache.getOrDefault(processor, 300L);
+    }
 
-        return redisService.isHealthyReactive(PaymentProcessor.DEFAULT)
-            .map(defaultHealthy -> {
-                PaymentProcessor best = defaultHealthy ? PaymentProcessor.DEFAULT : PaymentProcessor.FALLBACK;
-                lastBestProcessor = best;
-                return best;
-            });
+    public PaymentProcessor getBestProcessor() {
+        boolean isDefaultHealthy = healthCache.get(PaymentProcessor.DEFAULT).get();
+        boolean isFallbackHealthy = healthCache.get(PaymentProcessor.FALLBACK).get();
+
+        if (isDefaultHealthy && isFallbackHealthy) {
+            long defaultTime = getMinResponseTime(PaymentProcessor.DEFAULT);
+            long fallbackTime = getMinResponseTime(PaymentProcessor.FALLBACK);
+            return defaultTime <= fallbackTime ? PaymentProcessor.DEFAULT : PaymentProcessor.FALLBACK;
+        }
+        if (isDefaultHealthy) {
+            return PaymentProcessor.DEFAULT;
+        }
+        if (isFallbackHealthy) {
+            return PaymentProcessor.FALLBACK;
+        }
+        // If both are unhealthy, default to the one with the lower fee as a last resort
+        return PaymentProcessor.DEFAULT;
     }
 
     @Scheduled(fixedRate = 10000)
@@ -90,6 +102,7 @@ public class HealthCheckerService {
 
                             // Atualiza cache local
                             healthCache.get(processor).set(healthy);
+                            responseTimeCache.put(processor, minTime);
 
                             // Atualiza Redis
                             redisService.setHealthStatus(processor, healthy, minTime);
