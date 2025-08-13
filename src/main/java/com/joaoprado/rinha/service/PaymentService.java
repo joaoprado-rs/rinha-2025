@@ -38,7 +38,7 @@ public class PaymentService {
         .body(Mono.just(paymentRequest), PaymentRequest.class)
         .retrieve()
         .toBodilessEntity()
-        .timeout(Duration.ofMillis(200))
+        .timeout(Duration.ofMillis(300))
         .retryWhen(Retry.backoff(1, Duration.ofMillis(10))
             .filter(throwable -> !(throwable instanceof WebClientResponseException.BadRequest)))
         .then()

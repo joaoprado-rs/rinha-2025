@@ -19,7 +19,7 @@ public class WebClientConfig {
     @Bean
     public ConnectionProvider connectionProvider() {
         return ConnectionProvider.builder("payment-processor-pool")
-            .maxConnections(500)
+            .maxConnections(200)
             .maxIdleTime(Duration.ofSeconds(20))
             .maxLifeTime(Duration.ofMinutes(2))
             .pendingAcquireTimeout(Duration.ofSeconds(2))

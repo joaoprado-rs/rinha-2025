@@ -52,14 +52,14 @@ public class RedisService {
   }
 
   public void incrementPaymentCounter(PaymentProcessor paymentProcessor, PaymentRequest paymentRequest) {
-    // Formato otimizado: armazenar como string simples "PROCESSOR:AMOUNT" para reduzir operações Redis
     String correlationId = paymentRequest.correlationId().toString();
     long timestamp = Instant.parse(paymentRequest.requestedAt()).toEpochMilli();
     String paymentData = paymentProcessor.toString().toUpperCase() + ":" + paymentRequest.amount();
 
-    // Duas operações otimizadas em vez de múltiplas
+    redis.multi();
     redis.set("payment:" + correlationId, paymentData);
     redis.zadd("payments:by_timestamp", (double) timestamp, correlationId);
+    redis.exec();
   }
 
 

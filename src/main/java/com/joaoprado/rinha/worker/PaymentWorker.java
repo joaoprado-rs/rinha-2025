@@ -11,6 +11,7 @@ import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import reactor.core.Disposable;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.util.concurrent.Executor;
@@ -21,14 +22,12 @@ import java.util.logging.Logger;
 public class PaymentWorker {
 
   private static final Logger logger = Logger.getLogger(PaymentWorker.class.getName());
-
-  private static final int MAX_CONCURRENT = 600;
+  private static final int MAX_CONCURRENT = 150;
 
   private final PaymentQueue queue;
   private final PaymentService paymentService;
   private final RedisService redisService;
   private final HealthCheckerService healthChecker;
-  @Qualifier("metricsExecutor") private final Executor metricsExecutor;
 
   private Disposable subscription;
 
@@ -36,21 +35,19 @@ public class PaymentWorker {
       PaymentQueue queue,
       PaymentService paymentService,
       RedisService redisService,
-      HealthCheckerService healthChecker,
-      @Qualifier("metricsExecutor") Executor metricsExecutor
+      HealthCheckerService healthChecker
   ) {
     this.queue = queue;
     this.paymentService = paymentService;
     this.redisService = redisService;
     this.healthChecker = healthChecker;
-    this.metricsExecutor = metricsExecutor;
   }
 
   @PostConstruct
   public void startReactiveProcessing() {
     subscription = queue.getPaymentStream()
         .flatMap(this::processPaymentReactive, MAX_CONCURRENT)
-        .subscribeOn(Schedulers.boundedElastic())
+        .subscribeOn(Schedulers.parallel())
         .subscribe(
             result -> logger.fine("Payment processed successfully"),
             error -> logger.log(Level.SEVERE, "Error in payment stream: " + error.getMessage()),
@@ -64,29 +61,18 @@ public class PaymentWorker {
     return healthChecker.getBestProcessor()
         .flatMap(processor ->
             paymentService.execute(request, processor)
-                .doOnSuccess(result -> registerPaymentsSummary(request, processor))
+                .then(Mono.fromRunnable(() -> redisService.incrementPaymentCounter(processor, request)))
                 .onErrorResume(ex -> {
                     PaymentProcessor fallback = (processor == PaymentProcessor.DEFAULT)
                         ? PaymentProcessor.FALLBACK : PaymentProcessor.DEFAULT;
                     return paymentService.execute(request, fallback)
-                        .doOnSuccess(result -> registerPaymentsSummary(request, fallback))
+                        .then(Mono.fromRunnable(() -> redisService.incrementPaymentCounter(fallback, request)))
                         .onErrorResume(fallbackEx -> {
-                            logger.log(Level.FINE, "Both processors failed for payment {0}", request.correlationId());
-                            return reactor.core.publisher.Mono.empty();
+                            logger.log(Level.WARNING, "Both processors failed for payment {0}", request.correlationId());
+                            return Mono.empty();
                         });
                 })
-        );
-  }
-
-  private void registerPaymentsSummary(PaymentRequest request, PaymentProcessor processor) {
-    reactor.core.publisher.Mono.fromRunnable(() -> {
-      try {
-        redisService.incrementPaymentCounter(processor, request);
-      } catch (Exception ex) {
-      }
-    })
-    .subscribeOn(Schedulers.fromExecutor(metricsExecutor))
-    .subscribe();
+        ).then();
   }
 
   @PreDestroy

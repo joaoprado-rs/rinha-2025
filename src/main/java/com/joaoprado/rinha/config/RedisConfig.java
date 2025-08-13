@@ -19,8 +19,8 @@ public class RedisConfig {
     @Bean
     public ClientResources clientResources() {
         this.clientResources = DefaultClientResources.builder()
-            .ioThreadPoolSize(2)
-            .computationThreadPoolSize(2)
+            .ioThreadPoolSize(4)
+            .computationThreadPoolSize(4)
             .build();
         return this.clientResources;
     }
